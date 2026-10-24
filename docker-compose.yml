@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    container_name: adaptive-rag
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./data/local/app.db
+      REDIS_URL: ""
+      QDRANT_URL: ""
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      LOCAL_EMBEDDING_ENABLED: "false"
+      CROSS_ENCODER_ENABLED: "false"
+      UNSTRUCTURED_ENABLED: "false"
+    volumes:
+      - adaptive-rag-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  adaptive-rag-data:
