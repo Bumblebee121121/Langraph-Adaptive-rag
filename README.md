@@ -1,6 +1,6 @@
 
 ## Langraph-Adaptive-rag简介
-<p align="center"><strong>针对基于 FAQ 的传统客服系统长尾问题命中率极低，人工介入成本高的问题和常规 RAG 多跳推理能力差，幻觉问题严重的痛点设计并实现了基于 Langraph-Adaptive-RAG 的多智能体电商客服系统。</strong></p>
+<p align="center"><strong>针对基于 FAQ 的传统客服系统长尾问题命中率极低，人工介入成本高的问题和常规 RAG 多跳推理能力差，幻觉问题严重的痛点设计并实现了基于 Langraph框架的Adaptive-RAG 的多智能体电商客服系统。</strong></p>
 
 > **Adaptive RAG** 的核心决策是：这个问题需要直接回答、检索一条证据、交叉核对多条证据、调用业务工具，还是拒绝处理？
 
