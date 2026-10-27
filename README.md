@@ -1,5 +1,5 @@
 
-## Langraph-Adaptive-rag简介
+## 基于Langraph-Adaptive-rag的电商客服
 <p align="center"><strong>针对基于 FAQ 的传统客服系统长尾问题命中率极低，人工介入成本高的问题和常规 RAG 多跳推理能力差，幻觉问题严重的痛点设计并实现了基于 Langraph框架的Adaptive-RAG 的多智能体电商客服系统。</strong></p>
 
 > **Adaptive RAG** 的核心决策是：这个问题需要直接回答、检索一条证据、交叉核对多条证据、调用业务工具，还是拒绝处理？
@@ -24,6 +24,9 @@
 | `MULTI` | 多条件、跨条款问题 | 查询改写、多路检索与自纠错 |
 | `AGENT` | 查询订单、物流或发起业务操作 | 规划后调用受权限约束的工具 |
 | `REFUSE` | 越权、注入或证据不足 | 拒答或引导人工处理 |
+
+## 项目快照
+![alt text](image-1.png)
 
 ## 🚀 快速开始
 
