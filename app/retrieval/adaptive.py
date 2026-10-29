@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from app.core.action_requests import explicit_write_request
 from app.core.constants import PROMPT_VERSION_COMPLEXITY
 from app.core.enums import IntentLabel, QueryComplexity, RetrievalStrategy
 from app.core.exceptions import LLMOutputError, LLMProviderError
@@ -64,6 +65,18 @@ def rule_based_complexity(query: str, intent: IntentResult) -> ComplexityResult:
             strategy=RetrievalStrategy.DIRECT,
             confidence=0.9,
             rationale="social_or_greeting",
+        )
+    write_tool = {
+        IntentLabel.CANCEL_ORDER: "cancel_order",
+        IntentLabel.REFUND: "create_refund_request",
+        IntentLabel.RETURN_EXCHANGE: "create_return_request",
+    }.get(intent.label, "")
+    if explicit_write_request(text, write_tool):
+        return ComplexityResult(
+            complexity=QueryComplexity.TOOL_REQUIRED,
+            strategy=RetrievalStrategy.AGENT,
+            confidence=0.95,
+            rationale="explicit_write_request",
         )
     policy_question = not _ORDER_ID.search(text) and any(
         cue in text
@@ -134,7 +147,10 @@ class AdaptiveRouter:
 
     async def route(self, query: str, intent: IntentResult) -> ComplexityResult:
         fallback = rule_based_complexity(query, intent)
-        if isinstance(self._llm, OfflineLLMProvider):
+        if (
+            isinstance(self._llm, OfflineLLMProvider)
+            or fallback.rationale == "explicit_write_request"
+        ):
             return fallback
         try:
             response = await self._llm.generate(

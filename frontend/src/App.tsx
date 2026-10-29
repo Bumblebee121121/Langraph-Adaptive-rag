@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, CircleHelp, Menu, PanelLeftOpen } from "lucide-react";
+import { ArrowDown, CircleHelp, Eraser, Menu, PanelLeftOpen } from "lucide-react";
 import { checkHealth } from "./lib/api";
 import { useChat } from "./hooks/useChat";
 import { Composer } from "./components/Composer";
@@ -67,10 +67,11 @@ function App() {
       <header className="topbar">
         <button className="icon-button open-sidebar" aria-label="打开侧栏" title="打开侧栏" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}>{sidebarCollapsed ? <PanelLeftOpen size={20} /> : <Menu size={20} />}</button>
         <span className="model-title">Adaptive RAG</span>
-        <div className="topbar-right"><span className={`connection-pill ${healthy === false ? "offline" : ""}`}><span />{healthy === null ? "连接中" : healthy ? "已连接" : "服务未连接"}</span><button className="icon-button help-button" title="说明" aria-label="说明" onClick={() => window.open("https://github.com/JEen-wang/Adaptive-rag", "_blank", "noopener,noreferrer")}><CircleHelp size={19} /></button></div>
+        <div className="topbar-right">{chat.active?.sessionId && <button className="icon-button" title="清空本会话记忆（保留历史消息）" aria-label="清空会话记忆" disabled={chat.busy} onClick={() => void chat.forgetMemory()}><Eraser size={19} /></button>}<span className={`connection-pill ${healthy === false ? "offline" : ""}`}><span />{healthy === null ? "连接中" : healthy ? "已连接" : "服务未连接"}</span><button className="icon-button help-button" title="说明" aria-label="说明" onClick={() => window.open("https://github.com/Bumblebee121121/Langraph-Adaptive-rag", "_blank", "noopener,noreferrer")}><CircleHelp size={19} /></button></div>
       </header>
       {healthy === false && <div className="service-banner" role="status"><strong>暂时无法连接服务</strong><span>请确认后端已启动后重试。</span></div>}
-      {chat.active ? <div className="chat-content"><MessageView conversation={chat.active} busy={chat.busy} onConfirm={confirm} onCancel={(messageId) => chat.dismissAction(chat.active!.id, messageId)} /></div>
+      {chat.syncMessage && <div className="memory-banner" role="status">{chat.syncMessage}</div>}
+      {chat.active ? <div className="chat-content"><MessageView conversation={chat.active} busy={chat.busy} onConfirm={confirm} onCancel={(messageId) => void chat.cancelPending(messageId)} /></div>
         : <div className="welcome"><div className="welcome-inner"><Logo /><h1>有什么可以帮忙的？</h1><p>让知识、订单与售后服务在一次对话中自然协作。</p><div className="suggestions">{SUGGESTIONS.map((item) => <button key={item.title} onClick={() => suggest(item.prompt)}><span className="suggestion-icon">{item.icon}</span><span><strong>{item.title}</strong><small>{item.prompt}</small></span><ArrowDown size={15} /></button>)}</div></div></div>}
       <Composer busy={chat.busy} onSend={(message) => void chat.send(message)} onStop={chat.stop} draft={draft} onDraft={setDraft} inputRef={inputRef} />
     </main>

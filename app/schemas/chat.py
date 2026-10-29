@@ -32,6 +32,11 @@ class ActionProposal(BaseModel):
     summary: str
 
 
+class PreparationStep(BaseModel):
+    stage: str
+    status: Literal["running", "completed", "failed"]
+
+
 class ChatResponse(BaseModel):
     answer: str
     session_id: str
@@ -42,6 +47,8 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     pending_action: ActionProposal | None = None
     refused: bool = False
+    progress_nodes: list[str] = Field(default_factory=list)
+    preparation_steps: list[PreparationStep] = Field(default_factory=list)
     error_code: str | None = None
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     latency: LatencyBreakdown = Field(default_factory=LatencyBreakdown)

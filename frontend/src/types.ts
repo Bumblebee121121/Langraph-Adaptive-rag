@@ -1,5 +1,10 @@
 export type Strategy = "direct" | "single" | "multi" | "agent" | "refuse";
 
+export interface PreparationStep {
+  stage: string;
+  status: "running" | "completed" | "failed";
+}
+
 export interface Citation {
   document_id: string;
   title: string;
@@ -27,6 +32,8 @@ export interface ChatResponse {
   refused: boolean;
   error_code: string | null;
   latency: { total_ms: number };
+  progress_nodes?: string[];
+  preparation_steps?: PreparationStep[];
 }
 
 export interface ChatRequest {
@@ -48,6 +55,8 @@ export interface Capabilities {
 
 export type StreamEvent =
   | { event: "started"; trace_id: string }
+  | ({ event: "stage" } & PreparationStep)
+  | { event: "error"; message: string; error_code: string; trace_id: string }
   | { event: "node"; node: string; intent?: string; strategy?: Strategy }
   | { event: "token"; text: string }
   | { event: "answer"; data: ChatResponse }
@@ -63,6 +72,8 @@ export interface Message {
   strategy?: Strategy | null;
   traceId?: string;
   latencyMs?: number;
+  progressNodes?: string[];
+  preparationSteps?: PreparationStep[];
 }
 
 export interface Conversation {

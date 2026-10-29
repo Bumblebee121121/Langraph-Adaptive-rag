@@ -91,8 +91,10 @@ async def build_retrieval(settings: Settings, redis):
     return retriever, reranker, store
 
 
-async def build_container(settings: Settings, seed: bool = False) -> AppContainer:
-    """Compose runtime services from independently testable infrastructure builders."""
+async def build_container(settings: Settings, seed: bool | None = None) -> AppContainer:
+    """Compose services, restoring demo data by default only in development."""
+    if seed is None:
+        seed = settings.app_env == "development" and settings.seed_demo_on_startup
     llm: LLMProvider = (
         DeepSeekProvider(settings) if settings.llm_configured else OfflineLLMProvider()
     )
@@ -127,7 +129,10 @@ async def build_container(settings: Settings, seed: bool = False) -> AppContaine
     )
     if seed:
         async with session_factory() as session:
-            await seed_demo_data(session)
+            await seed_demo_data(
+                session,
+                reset=settings.app_env == "development" and settings.reset_demo_on_startup,
+            )
             await session.commit()
     logger.info(
         "runtime_ready database=%s cache=%s vector_store=%s llm=%s local_embedding=%s cross_encoder=%s",

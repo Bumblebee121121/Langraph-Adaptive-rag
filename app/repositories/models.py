@@ -113,3 +113,30 @@ class IdempotencyRow(Base):
     fingerprint: Mapped[str] = mapped_column(String(64))
     response_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ConversationMemoryRow(Base):
+    __tablename__ = "conversation_memory"
+
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id"), primary_key=True)
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    summary_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    forgotten_message_id: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PendingActionRow(Base):
+    __tablename__ = "pending_actions"
+
+    action_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    action_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MessageMetadataRow(Base):
+    __tablename__ = "message_metadata"
+
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), primary_key=True)
+    response_json: Mapped[str] = mapped_column(Text)

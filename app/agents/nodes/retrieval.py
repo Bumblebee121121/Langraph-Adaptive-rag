@@ -25,7 +25,7 @@ async def retrieval_node(
     settings: Settings,
 ) -> dict:
     started = time.perf_counter()
-    query = state["user_query"]
+    query = state.get("retrieval_query") or state.get("resolved_query") or state["user_query"]
     strategy = state.get("strategy")
     top_k = (
         settings.retrieval_top_k_complex

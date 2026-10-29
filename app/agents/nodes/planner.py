@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
-
 from app.agents.state import AgentState
+from app.core.action_requests import explicit_write_request as _explicit_write_request
 from app.core.exceptions import LLMOutputError, LLMProviderError
 from app.core.ids import new_id
+from app.memory.context import ORDER_RE, model_history
 from app.prompts.planner import PLANNER_SYSTEM, PLANNER_USER
 from app.providers.base import LLMProvider
 from app.providers.fake import OfflineLLMProvider
@@ -17,7 +17,7 @@ from app.skills.loader import match_skill
 from app.tools.permissions import WRITE_RISKS
 from app.tools.registry import ToolRegistry
 
-_ORDER_RE = re.compile(r"ORD\d+", re.IGNORECASE)
+_ORDER_RE = ORDER_RE
 _ALWAYS_AVAILABLE = ("search_knowledge", "escalate_to_human")
 
 
@@ -34,7 +34,14 @@ class Planner:
             lines.append(f"- {tool.name}: {tool.description} [{tool.risk.value}]")
         return "\n".join(lines) or "- (no tools)"
 
-    async def create_plan(self, query: str, intent_label: str, summary: str) -> AgentPlan:
+    async def create_plan(
+        self,
+        query: str,
+        intent_label: str,
+        summary: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+    ) -> AgentPlan:
         skill = match_skill(query, intent_label)
         allowed = _allowed_tools(skill, self._registry)
         if isinstance(self._llm, OfflineLLMProvider):
@@ -53,6 +60,7 @@ class Planner:
                             skill_context=_format_skill(skill),
                         ),
                     },
+                    *(history or []),
                     {
                         "role": "user",
                         "content": PLANNER_USER.format(
@@ -184,19 +192,59 @@ async def planner_node(state: AgentState, planner: Planner) -> dict:
             "pending_action": None,
         }
     intent = state.get("intent")
+    query = state.get("resolved_query") or state["user_query"]
+    requested = (
+        state.get("requested_tool")
+        if state.get("context_resolved")
+        else next(
+            (
+                name
+                for name in ("cancel_order", "create_refund_request", "create_return_request")
+                if _explicit_write_request(state["user_query"], name)
+            ),
+            None,
+        )
+    )
+    order_match = ORDER_RE.search(query)
+    if requested and (not order_match or state.get("extra", {}).get("ambiguous_order")):
+        return {
+            "plan": AgentPlan(steps=[], rationale="missing_order_id"),
+            "extra": {"missing_order_id": True},
+        }
     plan = await planner.create_plan(
-        state["user_query"],
+        query,
         intent.label.value if intent else "faq_policy",
         state.get("summary") or "",
+        history=model_history(state),
     )
+    if order_match:
+        for step in plan.steps:
+            if step.tool_name and "order_id" in step.arguments:
+                step.arguments["order_id"] = order_match.group(0).upper()
+    # Only an explicit user request or a persisted slot-filling request can
+    # create a write proposal. The model cannot substitute another action.
+    if requested and order_match:
+        steps = [
+            step
+            for step in plan.steps
+            if not step.tool_name or planner._registry.get(step.tool_name).risk not in WRITE_RISKS
+        ]
+        if requested in planner._registry.names():
+            steps.append(
+                PlanStep(
+                    step_id=len(steps) + 1,
+                    goal="explicit user request",
+                    tool_name=requested,
+                    arguments=_tool_arguments(requested, query),
+                )
+            )
+        plan = plan.model_copy(update={"steps": steps})
     write_steps = [
         step
         for step in plan.steps
         if step.tool_name and planner._registry.get(step.tool_name).risk in WRITE_RISKS
     ]
-    if any(
-        _explicit_write_request(state["user_query"], step.tool_name or "") for step in write_steps
-    ):
+    if any(step.tool_name == requested for step in write_steps):
         if any(not step.arguments.get("order_id") for step in write_steps):
             return {
                 "plan": plan.model_copy(update={"steps": []}),
@@ -207,8 +255,7 @@ async def planner_node(state: AgentState, planner: Planner) -> dict:
             "steps": [
                 step
                 for step in plan.steps
-                if step not in write_steps
-                or _explicit_write_request(state["user_query"], step.tool_name or "")
+                if step not in write_steps or step.tool_name == requested
             ]
         }
     )
@@ -227,31 +274,6 @@ async def planner_node(state: AgentState, planner: Planner) -> dict:
             )
             break
     return {"plan": plan, "pending_action": pending}
-
-
-def _explicit_write_request(query: str, tool_name: str) -> bool:
-    if any(
-        cue in query
-        for cue in (
-            "规则",
-            "政策",
-            "条件",
-            "怎么",
-            "能不能",
-            "是否",
-            "可以吗",
-            "能退吗",
-            "能取消吗",
-        )
-    ):
-        return False
-    if tool_name == "cancel_order":
-        return any(cue in query for cue in ("取消", "不想要了"))
-    if tool_name == "create_refund_request":
-        return any(cue in query for cue in ("申请退款", "帮我退款", "我要退款"))
-    if tool_name == "create_return_request":
-        return any(cue in query for cue in ("申请退货", "帮我退货", "我要退货", "提交退货"))
-    return False
 
 
 def _action_summary(tool_name: str, arguments: dict) -> str:

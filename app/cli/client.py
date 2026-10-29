@@ -135,6 +135,8 @@ class ChatCli:
         answer: dict[str, Any] | None = None
         printed = False
         async for event in events:
+            if event.get("event") == "error":
+                raise ChatFailed(str(event.get("message") or "请求处理失败，请稍后重试。"))
             maybe, printed = apply_event(
                 event, show_tokens=self._show_tokens, printed_nodes=printed
             )

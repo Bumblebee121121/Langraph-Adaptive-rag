@@ -1,17 +1,32 @@
 """Demo data seeding."""
 
+import json
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import OrderStatus
 from app.core.time import utcnow
-from app.repositories.models import OrderItemRow, OrderRow, ProductRow
+from app.repositories.models import (
+    AuditLogRow,
+    ConversationMemoryRow,
+    IdempotencyRow,
+    OrderItemRow,
+    OrderRow,
+    PendingActionRow,
+    ProductRow,
+    RefundRow,
+    ReturnRow,
+    SessionRow,
+)
 
 
-async def seed_demo_data(session: AsyncSession) -> None:
-    """Insert missing demo rows without changing existing orders or products."""
+async def seed_demo_data(session: AsyncSession, *, reset: bool = False) -> None:
+    """Fill missing demo rows, optionally restoring orders and their related activity.
+
+    The caller commits the reset and seed together in one transaction.
+    """
     now = utcnow()
     products = [
         ProductRow(
@@ -79,9 +94,45 @@ async def seed_demo_data(session: AsyncSession) -> None:
             receiver_city="杭州",
         ),
     ]
+    demo_order_ids = [order.order_id for order in orders]
+    if reset:
+        for model in (RefundRow, ReturnRow, OrderItemRow):
+            await session.execute(delete(model).where(model.order_id.in_(demo_order_ids)))
+        await session.execute(delete(AuditLogRow).where(AuditLogRow.payload.in_(demo_order_ids)))
+        # Old successful responses must not skip writes in the next demonstration.
+        for row in (await session.scalars(select(IdempotencyRow))).all():
+            if json.loads(row.response_json).get("order_id") in demo_order_ids:
+                await session.delete(row)
+        for action_row in (
+            await session.scalars(
+                select(PendingActionRow).where(PendingActionRow.user_id == "u_demo")
+            )
+        ).all():
+            if (
+                json.loads(action_row.action_json).get("arguments", {}).get("order_id")
+                in demo_order_ids
+            ):
+                await session.delete(action_row)
+        # Demo business facts are reset; keep historical text, but discard any
+        # unfinished action carried over from a previous demonstration.
+        for memory_row in (
+            await session.scalars(
+                select(ConversationMemoryRow).join(SessionRow).where(SessionRow.user_id == "u_demo")
+            )
+        ).all():
+            data = json.loads(memory_row.context_json)
+            if data.get("order_id") in demo_order_ids or (
+                data.get("awaiting_order") and data.get("pending_tool")
+            ):
+                data.update(pending_tool=None, pending_query="", awaiting_order=False)
+                memory_row.context_json = json.dumps(data, ensure_ascii=False)
     for order in orders:
-        if await session.get(OrderRow, order.order_id) is None:
+        existing = await session.get(OrderRow, order.order_id)
+        if existing is None:
             session.add(order)
+        elif reset:
+            for column in OrderRow.__table__.columns:
+                setattr(existing, column.key, getattr(order, column.key))
     items = [
         OrderItemRow(
             order_id="ORD10001",

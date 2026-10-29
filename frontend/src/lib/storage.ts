@@ -1,12 +1,14 @@
 import type { Conversation, Message } from "../types";
+import { DEMO_USER_ID } from "./api";
 
-const KEY = "adaptive-rag-web:v1";
+const LEGACY_KEY = "adaptive-rag-web:v1";
+const KEY = `${LEGACY_KEY}:${encodeURIComponent(DEMO_USER_ID)}`;
 const MAX_CONVERSATIONS = 50;
 const MAX_MESSAGES = 100;
 
 export function loadConversations(): Conversation[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) ?? (DEMO_USER_ID === "u_demo" ? localStorage.getItem(LEGACY_KEY) : null);
     if (!raw) return [];
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value)) return [];

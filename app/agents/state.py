@@ -6,6 +6,7 @@ from app.core.enums import QueryComplexity, RetrievalStrategy
 from app.schemas.agent import AgentPlan, ComplexityResult, IntentResult, ToolResult
 from app.schemas.chat import ActionProposal, ChatMessage
 from app.schemas.common import LatencyBreakdown, TokenUsage
+from app.schemas.memory import ConversationContext
 from app.schemas.retrieval import Citation, RetrievedChunk
 
 
@@ -22,6 +23,13 @@ class AgentState(TypedDict, total=False):
     user_query: str
     messages: list[ChatMessage]
     summary: str
+    conversation_context: ConversationContext
+    resolved_query: str
+    retrieval_query: str
+    requested_tool: str | None
+    context_resolved: bool
+    memory_notice: str
+    dismiss_action: bool
     intent: IntentResult | None
     complexity: ComplexityResult | None
     strategy: RetrievalStrategy | None

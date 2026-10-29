@@ -8,9 +8,10 @@
 2. [探活](#探活)
 3. [对话](#对话)
 4. [流式](#流式)
-5. [管理面](#管理面)
-6. [指标](#指标)
-7. [错误体](#错误体)
+5. [会话历史与记忆](#会话历史与记忆)
+6. [管理面](#管理面)
+7. [指标](#指标)
+8. [错误体](#错误体)
 
 前缀默认 `/api/v1`。OpenAPI：`http://localhost:8000/docs`。  
 对应：`app/api/routes/`、`app/schemas/chat.py`、`app/main.py`。
@@ -58,6 +59,8 @@ class ChatRequest(BaseModel):
 | `intent` / `complexity` / `strategy` | 路由解释性字段 |
 | `citations` | `document_id` / `title` / `chunk_id` |
 | `pending_action` | HITL 待确认 |
+| `preparation_steps` | 图外准备阶段及其最终状态，不计入图节点 |
+| `progress_nodes` | SSE 请求中实际完成的图内节点 |
 | `refused` | 护栏拒答 |
 | `error_code` | 业务侧拒绝码（仍可能 HTTP 200） |
 | `token_usage` / `latency` | 分阶段毫秒 |
@@ -79,13 +82,33 @@ SSE。事件 JSON：
 
 | `event` | 何时 |
 |---|---|
-| `started` | 请求受理 |
+| `started` | 开始处理请求，不表示已通过限流 |
+| `stage` | 图外准备阶段开始、完成或失败，包含 `stage` 和 `status`（`running` / `completed` / `failed`） |
 | `node` | LangGraph 节点完成（如 `classify_intent`） |
 | `token` | 最终答案经忠实度检查后分段发送；不包含模型的 JSON 包装或内部字段 |
 | `answer` | 最终 `ChatResponse` |
 | `done` | 结束 |
+| `error` | 流建立后的系统/请求错误，包含 `message`、`error_code`、`trace_id`，随后关闭流 |
 
 实现：`sse-starlette` + `ChatService.stream`。详见 [05 · Token 流式](05-agents-and-tools.md#token-流式)。
+
+图外阶段依次为 `rate_limit`、`apply_guardrail`、`validate_session`（包括确认凭证校验）、`restore_memory`、`resolve_context`、`initialize_state`。阶段事件在对应操作开始和结束时发送，慢速记忆恢复期间也会立即显示 `running`，不会等工作流结束后补发；LangGraph 仍为 9 个业务节点。最终响应与历史消息的 `preparation_steps` 保存阶段状态，不需新增数据库列。
+
+SSE 连接建立后 HTTP 状态通常已是 200，后续限流或异常通过 `error` 事件报告，客户端应显示其错误信息并结束等待；JSON `/chat` 仍使用原来的 HTTP 错误码。原始输入护栏拦截会返回 `refused=true` 的最终回答，仅包含实际执行过的准备阶段。中止流时会取消后台任务并关闭本轮数据库事务。
+
+## 会话历史与记忆
+
+以下接口均要求 `user_id`，服务端校验会话所属用户。当前仍使用演示身份，公开部署应由认证层提供可信身份。
+
+| 方法 | 路径（前缀 `/api/v1`） | 用途 |
+|---|---|---|
+| GET | `/sessions?user_id=u_demo&limit=50` | 最近会话列表，最多 100 条 |
+| GET | `/sessions/{id}?user_id=u_demo&limit=100` | 最近消息、引用及仍有效的确认卡片；用返回的 `next_before_id` 作为 `before_id` 读取更早消息 |
+| DELETE | `/sessions/{id}/memory?user_id=u_demo` | 清空摘要、订单/诉求上下文并作废待确认操作；保留可见历史，旧消息不再用于记忆 |
+| DELETE | `/sessions/{id}/actions/{action_id}?user_id=u_demo` | 取消指定待确认操作 |
+| DELETE | `/sessions/{id}?user_id=u_demo` | 删除服务端会话、消息、摘要和提案；保留业务订单和已执行结果 |
+
+删除/清空成功返回 204；会话不存在或用户不匹配返回 400。JSON 与 SSE 对话复用同一记忆与确认存储。详见[会话记忆](21-conversation-memory.md)。
 
 ## 管理面
 

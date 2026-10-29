@@ -1,4 +1,7 @@
+import pytest
+
 from app.agents.nodes.intent import rule_based_intent
+from app.core.action_requests import explicit_write_request
 from app.core.enums import IntentLabel, RetrievalStrategy
 from app.retrieval.adaptive import rule_based_complexity
 from app.schemas.agent import IntentResult
@@ -34,3 +37,16 @@ def test_specific_order_return_uses_tools() -> None:
     intent = IntentResult(label=IntentLabel.RETURN_EXCHANGE, confidence=0.8, prompt_version="t")
     routed = rule_based_complexity("订单 ORD10002 还能退货吗？", intent)
     assert routed.strategy == RetrievalStrategy.AGENT
+
+
+@pytest.mark.parametrize("query", ["我要把马克杯退掉，太丑了", "帮我把马克杯退回去"])
+def test_colloquial_return_uses_tools_to_request_order(query) -> None:
+    intent = rule_based_intent(query)
+    assert intent.label == IntentLabel.RETURN_EXCHANGE
+    assert rule_based_complexity(query, intent).strategy == RetrievalStrategy.AGENT
+    assert explicit_write_request(query, "create_return_request")
+
+
+@pytest.mark.parametrize("query", ["马克杯能退掉吗？", "马克杯可以退掉吗？", "退货需要什么条件？"])
+def test_return_questions_do_not_authorize_writes(query) -> None:
+    assert not explicit_write_request(query, "create_return_request")

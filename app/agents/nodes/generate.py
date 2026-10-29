@@ -10,12 +10,17 @@ from pydantic import BaseModel, Field
 from app.agents.state import AgentState
 from app.core.enums import RetrievalStrategy
 from app.core.exceptions import LLMOutputError, LLMProviderError
+from app.memory.context import model_history
 from app.prompts.answer import ANSWER_SYSTEM, ANSWER_USER
 from app.providers.base import LLMProvider
 from app.providers.fake import OfflineLLMProvider
 from app.providers.json_parser import parse_model
 from app.schemas.common import LatencyBreakdown, TokenUsage
 from app.schemas.retrieval import Citation
+
+REFUSAL_ANSWER = (
+    "这个问题超出电商客服范围，我无法协助。如需购物、订单、物流或售后帮助，请换个问题。"
+)
 
 
 class AnswerPayload(BaseModel):
@@ -26,6 +31,8 @@ class AnswerPayload(BaseModel):
 
 async def generate_node(state: AgentState, llm: LLMProvider) -> dict:
     started = time.perf_counter()
+    if state.get("memory_notice"):
+        return {"final_answer": state["memory_notice"], "citations": []}
     chunks = state.get("retrieved_chunks") or []
     tools = state.get("tool_results") or []
     if tools and all(not tool.success for tool in tools):
@@ -67,10 +74,17 @@ async def generate_node(state: AgentState, llm: LLMProvider) -> dict:
         return {"final_answer": answer, "citations": citations, "refused": False}
     messages = [
         {"role": "system", "content": ANSWER_SYSTEM},
+        *model_history(state),
         {
             "role": "user",
             "content": ANSWER_USER.format(
-                query=state["user_query"],
+                query=state["user_query"]
+                + (
+                    "\n本轮指代补全：" + state["resolved_query"]
+                    if state.get("resolved_query") != state["user_query"]
+                    and state.get("resolved_query")
+                    else ""
+                ),
                 intent=intent.label.value if intent else "unknown",
                 strategy=strategy.value,
                 evidence=evidence,
@@ -122,7 +136,7 @@ async def generate_node(state: AgentState, llm: LLMProvider) -> dict:
 
 async def refuse_node(state: AgentState) -> dict:
     return {
-        "final_answer": "这个问题超出电商客服范围，我无法协助。如需购物、订单、物流或售后帮助，请换个问题。",
+        "final_answer": REFUSAL_ANSWER,
         "refused": True,
         "citations": [],
     }
@@ -140,6 +154,11 @@ def _extractive_fallback(query: str, evidence: str, tool_text: str) -> str:
 def _offline_answer(state: AgentState) -> tuple[str, set[str]]:
     """Use only retrieved text or whitelisted tool fields when no LLM is configured."""
     strategy = state.get("strategy")
+    if state.get("extra", {}).get("memory_recall"):
+        context = state.get("conversation_context")
+        if "订单" in state["user_query"] and context and context.order_id:
+            return f"你在当前会话中提到的订单号是 {context.order_id}。", set()
+        return "当前未配置生成模型，无法可靠整理这段对话记忆。请配置生成模型后再试。", set()
     if strategy == RetrievalStrategy.DIRECT:
         return "你好，我可以帮你查看商品政策、订单、物流和售后问题。", set()
 

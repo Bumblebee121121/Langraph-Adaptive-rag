@@ -96,6 +96,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .connection-pill.offline > span { background: #d66161; box-shadow: 0 0 0 3px rgba(214, 97, 97, .12); }
 .service-banner { width: min(820px, calc(100% - 56px)); margin: 0 auto 8px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; border: 1px solid #f0c7c7; border-radius: 11px; background: #fff6f6; color: #a44747; font-size: 12px; }
 .service-banner span { color: #b66b6b; }
+.memory-banner { width: min(820px, calc(100% - 56px)); margin: 0 auto 8px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--muted); background: var(--sidebar); font-size: 12px; }
 :root[data-theme="dark"] .service-banner { border-color: #663d3d; background: #321f1f; color: #f0a6a6; }
 :root[data-theme="dark"] .service-banner span { color: #d28d8d; }
 .open-sidebar { display: none; }
@@ -145,6 +146,18 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .thinking { height: 28px; display: flex; align-items: center; gap: 4px; }
 .thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite ease-in-out; }
 .thinking span:nth-child(2) { animation-delay: .15s; }.thinking span:nth-child(3) { animation-delay: .3s; }
+.processing-progress { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+.processing-progress summary { cursor: pointer; line-height: 1.7; }
+.processing-progress summary span { font-size: 11px; }
+.processing-progress ol { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 7px; }
+.processing-progress li { display: flex; align-items: center; gap: 8px; }
+.processing-progress li svg { color: var(--accent); flex-shrink: 0; }
+.processing-progress li small { color: var(--muted); font-size: 10px; }
+.progress-section-title { margin-top: 12px; font-weight: 600; font-size: 11px; }
+.processing-progress .progress-running svg { animation: progress-spin 1s linear infinite; }
+.processing-progress .progress-failed svg, .processing-progress .progress-failed small { color: #c95656; }
+@keyframes progress-spin { to { transform: rotate(360deg); } }
+.progress-waiting { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 @keyframes pulse { 0%, 80%, 100% { opacity: .3; transform: scale(.7); } 40% { opacity: 1; transform: scale(1); } }
 .message-tools { display: flex; align-items: center; gap: 11px; margin-top: 8px; color: var(--muted); font-size: 11px; }
 .message-tools button { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }

@@ -25,7 +25,7 @@ pip install -e ".[dev]"
 # 系统包：poppler、tesseract（含 chi_sim）、Office 还需 libreoffice
 # 首次请求会加载 BAAI/bge-small-zh-v1.5（~90MB）与 BAAI/bge-reranker-base（国内可设 HF_ENDPOINT）
 cp .env.example .env
-python -m scripts.seed_demo  # 需要演示订单时执行一次，可安全重跑
+# 开发环境启动 API 时会自动补齐演示订单，无需手动初始化。
 ```
 
 `.env` 最小集：
@@ -49,7 +49,7 @@ python -m app.cli
 
 ### 要点
 
-`lifespan` 调用 `build_container`：建表、ingest `knowledge/`、编译 Graph。演示订单由上面的显式命令创建，API 启动不自动 seed。
+`lifespan` 调用 `build_container`：建表、ingest `knowledge/`、编译 Graph。`APP_ENV=development` 时默认每次启动恢复三条演示订单的初始状态、明细和相对时间，并清理其退款、退货、操作日志和幂等结果，便于重复演示。设置 `RESET_DEMO_ON_STARTUP=false` 可改为只补缺失数据、保留已有状态；设置 `SEED_DEMO_ON_STARTUP=false` 可关闭整个自动初始化。testing / production 不自动初始化或重置演示数据。也可用 `python -m scripts.seed_demo` 手动补齐，手动命令不会重置。
 
 ### 代码摘要
 
@@ -94,7 +94,9 @@ curl -s localhost:8002/api/v1/chat \
 | `ORD10002` | 已签收 | 定制马克杯 |
 | `ORD10003` | 已支付未发货 | T 恤 |
 
-先运行 `python -m scripts.seed_demo`，然后使用用户 `u_demo`。取消未发货会返回 `pending_action`：
+开发环境启动后即可使用用户 `u_demo`（浏览器前端的默认用户）体验。取消未发货会返回 `pending_action`：
+
+点击确认后，`ORD10003` 仅将状态从 `paid` 改为 `cancelled`，不会删除订单。重启后端后默认恢复为 `paid`；浏览器历史消息保留，重复演示时可新建对话。
 
 ```bash
 curl -s localhost:8002/api/v1/chat \

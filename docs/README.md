@@ -26,13 +26,17 @@
 | 解析 / 切块 / 向量库 / Hybrid / 精排 | [15](15-ingest-and-retrieval.md) | `app/retrieval/`、`app/providers/embeddings.py` |
 | 意图 / Skill / 工具 / HITL / MCP | [05](05-agents-and-tools.md) | `app/agents/nodes/`、`app/tools/`、`app/mcp/` |
 | HTTP / SSE | [06](06-api-reference.md) | `app/api/routes/chat.py`、`app/schemas/chat.py` |
+| 多轮记忆 / 重启恢复 / 清空记忆 | [21](21-conversation-memory.md) | `app/memory/session.py`、`app/memory/context.py`、`app/repositories/memory_repository.py` |
 | 环境变量 | [07](07-configuration.md) | `app/config/settings.py` |
 | 超时重试 / 指标 | [08](08-reliability.md) | `app/core/retry.py`、`app/observability/` |
 | 注入 / 越权 / 密钥 | [09](09-security.md) | `app/guardrails/`、`app/tools/permissions.py` |
 | 简历数字 | [10](10-evaluation.md) | `eval/runner.py` |
 | 完整测评报告 | [14](14-evaluation-report.md) | `eval/MEASURED.md`、`eval/dataset/` |
 | Docker | [11](11-deployment.md) | `docker-compose.yml` |
-
+| 写掘金/面试长文 | [13](13-interview-engineering-rag.md) | 对照仓库的「玩具 vs 工程化」 |
+| 项目面试书 | [目录](interview/README.md) | 三章连续讲述请求、证据与行动 |
+| 简历拷打 / 高频追问 | [项目拷打](project-deep-dive.md) | 34 题，含新手答/高手答对照与指标口径 |
+| 面试维度索引 | [16](16-interview-bagu-map.md) | zero2Agent 17 维度 ↔ 三章与实现边界 |
 
 ## 章节
 
@@ -53,6 +57,8 @@
 15. [解析、切块、向量化与检索](15-ingest-and-retrieval.md)
 16. [zero2Agent 面试维度索引](16-interview-bagu-map.md)
 
+当前会话记忆实现：[21 · 会话记忆](21-conversation-memory.md)。其中说明近期原文、滚动摘要、订单指代、服务端历史以及持久化确认的实际接入路径。
+
 项目面试书：[Chapter 1 · 执行图](interview/chapter1.md) → [Chapter 2 · 检索证据](interview/chapter2.md) → [Chapter 3 · 工具与可靠性](interview/chapter3.md)。逐题追问资料从 [面试书目录](interview/README.md) 进入。
 
 ## 仓库地图
@@ -69,7 +75,7 @@ app/
   repositories/   订单、会话、幂等
   providers/      DeepSeek / Embedding / Cross-Encoder
   guardrails/     注入、边界、忠实度
-  memory/         128k 预算与三级压缩
+  memory/         会话恢复、滚动摘要、指代消解与上下文预算
   prompts/        版本化模板
   observability/  JSON 日志、Prometheus、contextvars
 knowledge/        政策文档（Markdown；生产还可 PDF/Office/HTML/图片）

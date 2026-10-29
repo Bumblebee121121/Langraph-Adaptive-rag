@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ActionProposal, Citation, Conversation, Message } from "../types";
 import { Logo } from "./Logo";
+import { ProcessingProgress } from "./ProcessingProgress";
 
 function CitationList({ citations }: { citations: Citation[] }) {
   const unique = citations.filter((item, index, all) => all.findIndex((other) => other.chunk_id === item.chunk_id) === index);
@@ -51,7 +52,8 @@ export function MessageView({ conversation, busy, onConfirm, onCancel }: Message
       : <div className="message assistant-message" key={message.id}>
           <div className="assistant-avatar"><Logo small /></div>
           <div className="assistant-body">
-            {message.content ? <div className={`markdown ${message.state === "error" ? "message-error" : ""}`}><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div> : <div className="thinking"><span /><span /><span /></div>}
+            <ProcessingProgress message={message} />
+            {message.content ? <div className={`markdown ${message.state === "error" ? "message-error" : ""}`}><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div> : !message.progressNodes && <div className="thinking"><span /><span /><span /></div>}
             {message.state === "complete" && <>
               <CitationList citations={message.citations ?? []} />
               {message.pendingAction && <ActionCard action={message.pendingAction} disabled={busy} onConfirm={() => onConfirm(message.pendingAction!, message.id)} onCancel={() => onCancel(message.id)} />}

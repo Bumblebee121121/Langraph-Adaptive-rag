@@ -97,9 +97,12 @@ class Settings(BaseSettings):
 | `MAX_AGENT_STEPS` | 8 | |
 | `MAX_TOOL_CALLS` | 6 | |
 | `TOKEN_BUDGET` | 128000 | |
-| `COMPRESS_SOFT_RATIO` | 0.50 | |
-| `COMPRESS_HARD_RATIO` | 0.70 | |
-| `AUTO_COMPACT_RATIO` | 0.85 | |
+| `MEMORY_RECENT_MESSAGES` | 20 | 保留的原文消息数，2–100 |
+| `MEMORY_CONTEXT_TOKENS` | 6000 | 每轮会话记忆预算，256–32000 |
+| `MEMORY_SUMMARY_MAX_CHARS` | 4000 | 滚动摘要存储上限，256–8000 字符 |
+| `COMPRESS_SOFT_RATIO` | 0.50 | 独立分级压缩工具的阈值；会话记忆在模型调用前按窗口/预算汇总 |
+| `COMPRESS_HARD_RATIO` | 0.70 | 独立分级压缩工具的阈值 |
+| `AUTO_COMPACT_RATIO` | 0.85 | 独立分级压缩工具的阈值 |
 | `RATE_LIMIT_PER_MINUTE` | 60 | 按 `user_id` |
 | `RETRIEVAL_CACHE_TTL_SECONDS` | 60 | 政策问 |
 | `ADMIN_API_TOKEN` | 空 | 生产必填才能开 admin |

@@ -1,10 +1,14 @@
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.agents.nodes.planner import Planner, planner_node
 from app.core.enums import ToolRisk
 from app.core.exceptions import InvalidRequestError
 from app.providers.fake import OfflineLLMProvider
-from app.schemas.chat import ActionProposal, ChatRequest, ChatResponse
+from app.repositories.db import init_schema
+from app.repositories.memory_repository import MemoryRepository
+from app.repositories.session_repository import SessionRepository
+from app.schemas.chat import ActionProposal, ChatRequest
 from app.services.chat_service import ChatService
 from app.tools.aftersale_tools import CancelOrderTool
 from app.tools.order_tools import GetOrderTool
@@ -42,28 +46,27 @@ async def test_cancellation_needs_explicit_request_and_confirmation() -> None:
     assert confirmed["plan"].steps[0].arguments == {"order_id": "ORD10003"}
 
 
-def test_confirmation_is_bound_to_session_and_user() -> None:
+async def test_confirmation_is_bound_to_session_and_user() -> None:
     service = ChatService.__new__(ChatService)
-    service._pending_actions = {}
-    request = ChatRequest(message="取消订单 ORD10003", user_id="u_demo")
-    response = ChatResponse(
-        answer="请确认",
-        session_id="sess_demo",
-        trace_id="trace_demo",
-        pending_action=_action(),
-    )
-    service._remember_pending(request, response)
-
-    confirmed = ChatRequest(
-        message="确认执行",
-        user_id="u_demo",
-        session_id="sess_demo",
-        confirm_action_id="act_test",
-    )
-    assert service._resolve_confirmation(confirmed, "sess_demo") == _action()
-
-    forged = confirmed.model_copy(update={"user_id": "someone_else"})
-    with pytest.raises(InvalidRequestError):
-        service._resolve_confirmation(forged, "sess_demo")
-    with pytest.raises(InvalidRequestError):
-        service._resolve_confirmation(confirmed, "another_session")
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    await init_schema(engine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as db:
+            await SessionRepository(db).get_or_create("sess_demo", "u_demo")
+            await MemoryRepository(db).remember_action("sess_demo", "u_demo", _action())
+            await db.flush()
+            confirmed = ChatRequest(
+                message="确认执行",
+                user_id="u_demo",
+                session_id="sess_demo",
+                confirm_action_id="act_test",
+            )
+            assert await service._resolve_confirmation(confirmed, "sess_demo", db) == _action()
+            forged = confirmed.model_copy(update={"user_id": "someone_else"})
+            with pytest.raises(InvalidRequestError):
+                await service._resolve_confirmation(forged, "sess_demo", db)
+            with pytest.raises(InvalidRequestError):
+                await service._resolve_confirmation(confirmed, "another_session", db)
+    finally:
+        await engine.dispose()

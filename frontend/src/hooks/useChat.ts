@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { ChatResponse, Conversation, Message } from "../types";
-import { streamChat } from "../lib/api";
+import type { ChatResponse, Conversation, Message, StreamEvent } from "../types";
+import { streamChat, DEMO_USER_ID, listConversations, getConversation, deleteConversation, forgetConversation, cancelAction } from "../lib/api";
 import { loadConversations, saveConversations } from "../lib/storage";
 
 interface State {
@@ -10,8 +10,12 @@ interface State {
 
 type Action =
   | { type: "select"; id: string | null }
+  | { type: "sync"; conversations: Conversation[]; startedAt?: number }
+  | { type: "hydrate"; id: string; conversation: Conversation; previousMessages: Message[] }
+  | { type: "forget"; id: string }
   | { type: "delete"; id: string }
   | { type: "start"; conversation: Conversation; user: Message; assistant: Message }
+  | { type: "stream"; conversationId: string; messageId: string; event: StreamEvent }
   | { type: "token"; conversationId: string; messageId: string; text: string }
   | { type: "complete"; conversationId: string; messageId: string; response: ChatResponse }
   | { type: "fail"; conversationId: string; messageId: string; message: string; stopped: boolean }
@@ -28,8 +32,20 @@ function updateConversation(
   };
 }
 
-function reducer(state: State, action: Action): State {
+export function chatReducer(state: State, action: Action): State {
   switch (action.type) {
+    case "sync": {
+      const serverIds = new Set(action.conversations.map((c) => c.sessionId));
+      const local = state.conversations.filter((c) => !c.sessionId || serverIds.has(c.sessionId) || c.updatedAt >= (action.startedAt ?? Infinity) || c.messages.some((m) => m.state === "streaming"));
+      const known = new Set(local.map((c) => c.sessionId));
+      const conversations = [...local, ...action.conversations.filter((c) => !known.has(c.sessionId))].sort((a, b) => b.updatedAt - a.updatedAt);
+      return { ...state, conversations, activeId: conversations.some((c) => c.id === state.activeId) ? state.activeId : null };
+    }
+    case "hydrate":
+      return updateConversation(state, action.id, (item) => item.messages !== action.previousMessages || item.messages.some((m) => m.state === "streaming")
+        ? item : { ...action.conversation, id: item.id, title: item.title });
+    case "forget":
+      return updateConversation(state, action.id, (item) => ({ ...item, messages: item.messages.map((m) => ({ ...m, pendingAction: null })) }));
     case "select":
       return { ...state, activeId: action.id };
     case "delete":
@@ -46,6 +62,39 @@ function reducer(state: State, action: Action): State {
         activeId: next.id,
         conversations: [next, ...state.conversations.filter((item) => item.id !== next.id)],
       };
+    }
+    case "stream": {
+      const { event, conversationId, messageId } = action;
+      if (event.event === "token") {
+        return chatReducer(state, { type: "token", conversationId, messageId, text: event.text });
+      }
+      if (event.event === "answer") {
+        return chatReducer(state, { type: "complete", conversationId, messageId, response: event.data });
+      }
+      if (event.event === "stage") {
+        return updateConversation(state, conversationId, (item) => ({
+          ...item,
+          messages: item.messages.map((message) => {
+            if (message.id !== messageId) return message;
+            const steps = message.preparationSteps ?? [];
+            const step = { stage: event.stage, status: event.status };
+            return { ...message, preparationSteps: steps.some((s) => s.stage === event.stage)
+              ? steps.map((s) => s.stage === event.stage ? step : s) : [...steps, step] };
+          }),
+        }));
+      }
+      if (event.event === "started" || event.event === "node") {
+        return updateConversation(state, conversationId, (item) => ({
+          ...item,
+          messages: item.messages.map((message) => {
+            if (message.id !== messageId) return message;
+            if (event.event === "started") return { ...message, traceId: event.trace_id };
+            const nodes = message.progressNodes ?? [];
+            return { ...message, progressNodes: nodes.includes(event.node) ? nodes : [...nodes, event.node] };
+          }),
+        }));
+      }
+      return state;
     }
     case "token":
       return updateConversation(state, action.conversationId, (item) => ({
@@ -69,8 +118,10 @@ function reducer(state: State, action: Action): State {
               strategy: action.response.strategy,
               traceId: action.response.trace_id,
               latencyMs: action.response.latency.total_ms,
+              progressNodes: action.response.progress_nodes?.length ? action.response.progress_nodes : message.progressNodes,
+              preparationSteps: action.response.preparation_steps ?? message.preparationSteps,
             }
-          : message),
+          : { ...message, pendingAction: null }),
       }));
     case "fail":
       return updateConversation(state, action.conversationId, (item) => ({
@@ -93,10 +144,8 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const DEMO_USER_ID = import.meta.env.VITE_DEMO_USER_ID || "u_demo";
-
 export function useChat() {
-  const [state, dispatch] = useReducer(reducer, undefined, () => ({
+  const [state, dispatch] = useReducer(chatReducer, undefined, () => ({
     conversations: loadConversations(),
     activeId: null,
   }));
@@ -105,6 +154,17 @@ export function useChat() {
   const requestRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const removedSessions = useRef(new Set<string>());
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    void listConversations(controller.signal).then((conversations) => {
+      dispatch({ type: "sync", conversations: conversations.filter((c) => !c.sessionId || !removedSessions.current.has(c.sessionId)), startedAt });
+    }).catch(() => { if (!controller.signal.aborted) setSyncMessage("历史会话暂未同步，当前显示浏览器缓存。"); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => saveConversations(state.conversations), 300);
@@ -133,7 +193,7 @@ export function useChat() {
       messages: [],
     };
     const user: Message = { id: crypto.randomUUID(), role: "user", content: text, state: "complete" };
-    const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", state: "streaming" };
+    const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", state: "streaming", progressNodes: [] };
     const controller = new AbortController();
     requestRef.current = controller;
     busyRef.current = true;
@@ -150,13 +210,8 @@ export function useChat() {
           ...(confirmActionId ? { confirm_action_id: confirmActionId } : {}),
         },
         (event) => {
-          if (event.event === "token") {
-            dispatch({ type: "token", conversationId: conversation.id, messageId: assistant.id, text: event.text });
-          }
-          if (event.event === "answer") {
-            answered = true;
-            dispatch({ type: "complete", conversationId: conversation.id, messageId: assistant.id, response: event.data });
-          }
+          if (event.event === "answer") answered = true;
+          dispatch({ type: "stream", conversationId: conversation.id, messageId: assistant.id, event });
         },
         controller.signal,
       );
@@ -184,15 +239,47 @@ export function useChat() {
   const select = useCallback((id: string | null) => {
     stop();
     dispatch({ type: "select", id });
+    setSyncMessage("");
+    const conversation = stateRef.current.conversations.find((c) => c.id === id);
+    if (conversation?.sessionId) {
+      void getConversation(conversation.sessionId).then((server) => dispatch({ type: "hydrate", id: conversation.id, conversation: server, previousMessages: conversation.messages }))
+        .catch(() => setSyncMessage("会话暂未同步，当前显示浏览器缓存。"));
+    }
   }, [stop]);
 
-  const remove = useCallback((id: string) => {
+  const remove = useCallback(async (id: string) => {
     if (stateRef.current.activeId === id) stop();
-    dispatch({ type: "delete", id });
+    const conversation = stateRef.current.conversations.find((c) => c.id === id);
+    try {
+      if (conversation?.sessionId) await deleteConversation(conversation.sessionId);
+      if (conversation?.sessionId) removedSessions.current.add(conversation.sessionId);
+      dispatch({ type: "delete", id });
+      setSyncMessage("");
+    } catch { setSyncMessage("删除失败，会话仍保留，请稍后重试。"); }
   }, [stop]);
 
   const dismissAction = useCallback((conversationId: string, messageId: string) => {
     dispatch({ type: "dismiss", conversationId, messageId });
+  }, []);
+
+  const cancelPending = useCallback(async (messageId: string) => {
+    const conversation = stateRef.current.conversations.find((c) => c.id === stateRef.current.activeId);
+    const proposal = conversation?.messages.find((m) => m.id === messageId)?.pendingAction;
+    if (!conversation?.sessionId || !proposal) return;
+    try {
+      await cancelAction(conversation.sessionId, proposal.action_id);
+      dispatch({ type: "dismiss", conversationId: conversation.id, messageId });
+    } catch { setSyncMessage("取消操作失败，请稍后重试。"); }
+  }, []);
+
+  const forgetMemory = useCallback(async () => {
+    const conversation = stateRef.current.conversations.find((c) => c.id === stateRef.current.activeId);
+    if (!conversation?.sessionId || busyRef.current) return;
+    try {
+      await forgetConversation(conversation.sessionId);
+      dispatch({ type: "forget", id: conversation.id });
+      setSyncMessage("已清空本会话记忆。历史消息保留，后续对话从此刻重新记忆。");
+    } catch { setSyncMessage("清空记忆失败，请稍后重试。"); }
   }, []);
 
   const active = state.conversations.find((item) => item.id === state.activeId) ?? null;
@@ -205,5 +292,8 @@ export function useChat() {
     select,
     remove,
     dismissAction,
+    cancelPending,
+    forgetMemory,
+    syncMessage,
   };
 }

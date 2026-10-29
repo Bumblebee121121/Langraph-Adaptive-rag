@@ -1,4 +1,4 @@
-"""LangGraph state machine that wires the agent nodes together."""
+"""Business graph; ChatService performs admission checks and context preparation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from langgraph.graph.state import CompiledStateGraph
 from app.agents.nodes.executor import executor_node
 from app.agents.nodes.faithfulness import faithfulness_node
 from app.agents.nodes.generate import generate_node, refuse_node
-from app.agents.nodes.guardrail import guardrail_node
 from app.agents.nodes.intent import IntentClassifier
 from app.agents.nodes.memory import memory_node
 from app.agents.nodes.planner import Planner, planner_node
@@ -59,7 +58,6 @@ def build_graph(
     summarizer = ConversationSummarizer(llm)
 
     graph = StateGraph(AgentState)
-    graph.add_node("apply_guardrail", guardrail_node)
     graph.add_node("classify_intent", partial(intent_node, classifier=classifier))
     graph.add_node("route_complexity", partial(router_node, router=adaptive))
     graph.add_node(
@@ -80,15 +78,7 @@ def build_graph(
     graph.add_node("check_faithfulness", partial(faithfulness_node, checker=checker, llm=llm))
     graph.add_node("compact_memory", partial(memory_node, settings=settings, summarizer=summarizer))
 
-    def _after_guardrail(state: AgentState) -> str:
-        return "refuse_answer" if state.get("refused") else "classify_intent"
-
-    graph.add_edge(START, "apply_guardrail")
-    graph.add_conditional_edges(
-        "apply_guardrail",
-        _after_guardrail,
-        {"refuse_answer": "refuse_answer", "classify_intent": "classify_intent"},
-    )
+    graph.add_edge(START, "classify_intent")
     graph.add_edge("classify_intent", "route_complexity")
     graph.add_conditional_edges(
         "route_complexity",

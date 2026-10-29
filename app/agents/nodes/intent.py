@@ -19,7 +19,7 @@ _KEYWORD_RULES: list[tuple[tuple[str, ...], IntentLabel]] = [
     (("你好", "您好", "hi", "hello"), IntentLabel.GREETING),
     (("物流", "快递", "运单", "到哪"), IntentLabel.LOGISTICS),
     (("退款进度", "钱什么时候到"), IntentLabel.REFUND),
-    (("退货", "换货", "七天", "7天无理由"), IntentLabel.RETURN_EXCHANGE),
+    (("退货", "换货", "退掉", "退回去", "七天", "7天无理由"), IntentLabel.RETURN_EXCHANGE),
     (("取消订单", "不想要了"), IntentLabel.CANCEL_ORDER),
     (("优惠券", "满减", "包邮券"), IntentLabel.COUPON),
     (("推荐", "有什么类似"), IntentLabel.RECOMMENDATION),
@@ -74,7 +74,9 @@ class IntentClassifier:
         self._prompt_version = prompt_version
         self._apply_overlay = apply_overlay
 
-    async def classify(self, query: str) -> IntentResult:
+    async def classify(
+        self, query: str, *, history: list[dict[str, str]] | None = None
+    ) -> IntentResult:
         fallback = rule_based_intent(query)
         if isinstance(self._llm, OfflineLLMProvider):
             return self._maybe_overlay(query, fallback)
@@ -82,6 +84,7 @@ class IntentClassifier:
             response = await self._llm.generate(
                 [
                     {"role": "system", "content": self._system_prompt},
+                    *(history or []),
                     {
                         "role": "user",
                         "content": INTENT_USER.format(

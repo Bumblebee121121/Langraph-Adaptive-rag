@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     )
 
     app_env: Literal["development", "testing", "production"] = "development"
+    seed_demo_on_startup: bool = True
+    reset_demo_on_startup: bool = True
     app_name: str = "adaptive-rag-cs"
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
@@ -60,6 +62,9 @@ class Settings(BaseSettings):
     compress_soft_ratio: float = 0.50
     compress_hard_ratio: float = 0.70
     auto_compact_ratio: float = 0.85
+    memory_recent_messages: int = Field(default=20, ge=2, le=100)
+    memory_context_tokens: int = Field(default=6000, ge=256, le=32000)
+    memory_summary_max_chars: int = Field(default=4000, ge=256, le=8000)
 
     max_agent_steps: int = 8
     max_tool_calls: int = 6
