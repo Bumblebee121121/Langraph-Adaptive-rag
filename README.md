@@ -26,7 +26,7 @@
 | `REFUSE` | 越权、注入或证据不足 | 拒答或引导人工处理 |
 
 ## 项目快照
-![alt text](image-1.png)
+![alt text](image.png)
 
 ## 🚀 快速开始
 
