@@ -143,25 +143,74 @@ PY
 
 ## 🏗️ 系统架构
 
+系统以 `ChatService` 为对话入口，以 LangGraph `StateGraph(AgentState)` 编排业务节点。启动时由依赖容器装配数据库、模型、检索器与工具注册表；每轮请求先完成安全检查和上下文准备，再进入五种策略对应的处理路径。
+
+### 分层与依赖
+
 ```mermaid
-flowchart LR
-    U["用户 · Web / CLI / HTTP"] --> API["FastAPI · JSON / SSE"]
-    API --> S["ChatService"]
-    S --> G["LangGraph：护栏 → 意图 → 复杂度路由"]
-    G --> D["DIRECT"]
-    G --> R["SINGLE / MULTI"]
-    G --> A["AGENT"]
-    G --> F["REFUSE"]
-    R --> H["BM25 + 向量 → RRF → 精排"]
-    A --> T["权限校验 → 工具 → 人工确认"]
-    D --> O["生成 / 忠实度检查"]
-    H --> O
-    T --> O
-    F --> O
-    O --> X["回答 + 引用 + trace_id"]
+flowchart TB
+    U["React Web / Python CLI / HTTP 客户端"] --> API["FastAPI：JSON / SSE、会话与记忆接口"]
+    API --> S["ChatService：限流、输入护栏、会话校验、记忆恢复、结果持久化"]
+    S --> G["LangGraph：意图识别 → 复杂度路由 → 检索 / 工具 / 回答"]
+    S <--> DB[("SQLite / PostgreSQL：订单、消息、摘要、上下文、待确认操作、幂等结果")]
+    G --> R["检索：查询改写、混合召回、精排、Self-RAG"]
+    G --> T["工具：Skills 约束规划 → 权限与幂等校验 → 执行 / 回退"]
+    G --> L["模型 Provider：生成、分类、规划、摘要、证据评估"]
+    R --> BM["BM25 进程内索引"]
+    R --> V[("Qdrant / 内存向量库")]
+    R --> E["Embedding / Cross-Encoder Provider"]
+    S --> C["Redis / 内存：限流"]
+    R --> RC["Redis / 内存：检索缓存"]
+    T --> DB
+    T --> R
+    T --> MCP["可选 MCP 适配：本地工具 / 固定 HTTP JSON 接口"]
+    K["knowledge：解析 → 清洗、切块、去重"] --> BM
+    K --> EV["Embedding 编码"] --> V
 ```
 
-HTTP 层处理校验与序列化，`ChatService` 编排对话，Graph 决定路径，检索器与工具由容器装配。默认数据库为 SQLite；Redis、Qdrant 和远程模型按配置接入。完整的节点、降级路径和依赖关系见[架构与运行流程](docs/17-architecture-flow.md)。
+| 层次 | 职责 | 源码入口 |
+|:---|:---|:---|
+| 接入层 | HTTP 校验、错误响应、请求追踪；JSON 与 SSE 对话、会话历史及记忆管理 | [应用工厂](app/main.py) · [API 路由](app/api/routes/) |
+| 服务层 | 在数据库事务中准备上下文、调用 Graph、保存消息及响应元数据，维护待确认操作 | [ChatService](app/services/chat_service.py) |
+| 编排层 | 通过共享 `AgentState` 传递意图、策略、证据、工具结果、引用与会话上下文 | [Graph](app/agents/graph.py) · [状态定义](app/agents/state.py) |
+| 检索层 | 启动时入库；查询时缓存、BM25 与向量召回、RRF 融合、精排及有界多跳检索 | [容器装配](app/services/container.py) · [检索模块](app/retrieval/) |
+| 工具层 | 按 Skills 约束生成计划，通过注册表调用订单、物流、商品、售后和知识工具；可选接入 MCP 适配工具 | [规划节点](app/agents/nodes/planner.py) · [工具注册](app/tools/factory.py) · [MCP](app/mcp/) |
+| 记忆与存储层 | 保存会话、滚动摘要、结构化上下文、待确认操作和幂等结果，按 Token 预算恢复历史 | [记忆恢复](app/memory/session.py) · [仓储](app/repositories/) |
+
+### 一轮对话的实际流程
+
+`ChatService` 依次执行**用户限流 → 原始输入注入检测 → 会话归属校验与加锁、确认操作校验 → 恢复历史和滚动摘要 → 指代与订单上下文补全 → 初始化状态**。注入检测失败会直接返回拒答，不打开数据库会话，也不进入 Graph。
+
+以下节点名称与 [`build_graph()`](app/agents/graph.py) 一致：
+
+```mermaid
+flowchart TD
+    START([START]) --> I["classify_intent：结合历史识别意图"]
+    I --> R{"route_complexity：选择策略"}
+    R -->|DIRECT| G["generate_answer：生成 / 离线证据回答 / 确认提示"]
+    R -->|SINGLE / MULTI| D["retrieve_docs：混合检索与精排"]
+    R -->|AGENT| P["plan_tasks：Skills 与工具规划"]
+    R -->|REFUSE| F["refuse_answer：拒答"]
+    D --> G
+    P --> E["execute_tools：待确认时跳过；其余按权限执行"]
+    E --> G
+    G --> C["check_faithfulness：按条件核验证据与自纠错"]
+    C --> M["compact_memory：更新本轮消息与会话上下文"]
+    F --> M
+    M --> FINISH([END])
+```
+
+- **单轮与多跳检索：** `SINGLE` 对原问题和改写查询去重后最多检索两路，合并候选再精排；`MULTI` 在 `retrieve_docs` 内执行“改写 → 检索 → 精排 → 证据充分性评估”，根据缺失信息继续检索，最多 `max_retrieval_hops` 轮。两者均复用 BM25 + 向量召回及 RRF 融合。
+- **业务操作与人工确认：** 写操作必须来自明确用户请求或已保存的补充信息流程。首次规划只返回 `pending_action`，执行节点跳过工具调用；提案持久化并在 15 分钟后过期。下一轮携带 `confirm_action_id`，服务核对用户、会话与有效期，再按保存的工具和参数进入 `AGENT` 路径，执行权限、业务校验及幂等检查。读工具失败可按映射回退到其他工具或知识检索。
+- **回答与自纠错：** 生成节点使用历史、摘要、检索片段和工具结果，并把引用限制在实际检索的片段内。忠实度节点对需要核验的回答执行检查；不通过时尝试一次改写并复检，再尝试抽取式回退，仍缺乏支持则拒答。`DIRECT`、离线模式、待确认提示等场景跳过该检查；`REFUSE` 分支直接进入记忆节点。
+- **多轮记忆与落库：** 滚动摘要和历史窗口的预算控制发生在进入 Graph **之前**，历史与摘要供意图识别、规划和生成使用；`compact_memory` 节点负责追加本轮消息和更新结构化上下文。Graph 结束后，服务保存消息、响应元数据及确认状态并提交事务。
+- **SSE 与观测：** 流式接口先发送准备阶段和 Graph 节点进度，答案核验完成后再将最终文本分块发送，最后返回完整响应及结束事件。响应包含 `strategy`、`citations`、`trace_id` 等字段；请求和关键阶段通过结构化日志、Prometheus `/metrics` 记录。
+
+### 运行依赖与降级
+
+默认数据库为 SQLite，可配置 PostgreSQL；Redis 可用时承担限流和检索缓存，否则使用进程内实现。知识库启动时全量解析并建立 BM25 索引与向量记录；配置 Qdrant 后优先写入 Qdrant，入库失败则回退内存向量库。Embedding 优先使用已配置的兼容 API，否则尝试本地 BGE，本地模型不可用时使用 Hash 回退；Cross-Encoder 不可用时采用词法精排。未配置 DeepSeek 密钥时使用离线 Provider，返回资料节选或可核对的业务字段。具体装配见[依赖容器](app/services/container.py)和[模型 Provider](app/providers/)。
+
+完整的节点说明与运行示例见[架构与运行流程](docs/17-architecture-flow.md)。
 
 <a id="evaluation"></a>
 
